@@ -1,0 +1,31 @@
+'SNES Controller':
+    button:
+        1: ' '
+        4: 'a'
+        5: 'd'
+        8: 'q'
+        9: 'e'
+    axis:
+        4:
+            low:  'a'
+            high: 'd'
+        5:
+            low:  'w'
+            high: 's'
+
+'Pro Controller':
+    button:
+        1: ' '
+        4: 'a'
+        5: 'd'
+        6: 'a'
+        7: 'd'
+        8: 'q'
+        9: 'e'
+    axis:
+        4:
+            low:  'a'
+            high: 'd'
+        5:
+            low:  'w'
+            high: 's'

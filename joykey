@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Based on gist by rdb realeased under the Unlicense (unlicense.org)
+# https://gist.github.com/rdb/8864666
+
+# Based on information from:
+# https://www.kernel.org/doc/Documentation/input/joystick-api.txt
+
+# Keyboard input is generated using pynput which is released under
+# the LGPL license
+# https://github.com/moses-palmer/pynput
+
+import os
+import sys
+import time
+import yaml
+import struct
+import array
+from fcntl import ioctl
+import pynput
+
+version = '1.0.0'
+
+print(F'\033[1mjoykey {version}\033[0m\n')
+
+def has_flags(*flags):
+    return any(x in sys.argv[1:] for x in flags)
+
+help_msg = F'''{sys.argv[0]} [options]
+
+Options:
+    -h, --help
+        Show this help message
+    -v, --print-state
+        Print the state of the joystick when conntected
+'''
+
+if has_flags('-h', '--help'):
+    print(help_msg)
+    sys.exit(0)
+
+print_state_enabled = has_flags('-v', '--print-state')
+
+jsdev = None
+name = ''
+num_axis = 0
+num_button = 0
+axis_states = {}
+button_states = {}
+
+keyboard = pynput.keyboard.Controller()
+
+config = {}
+button_config = {}
+axis_config = {}
+
+config_paths = [
+    './joykey.yaml',
+    os.path.join(os.path.dirname(__file__), 'joykey.yaml'),
+    '~/.config/joykey.yaml',
+    '/etc/joykey.yaml',
+]
+
+for config_path in config_paths:
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        break
+    except FileNotFoundError:
+        pass
+else:
+    print('\033[31mNo controller config file found.\033[0m')
+    sys.exit(1)
+
+
+def print_state():
+    if not print_state_enabled:
+        return
+
+    parts = []
+
+    for i in range(num_button):
+        if button_states.get(i):
+            parts.append(F'{i} (x)')
+        else:
+            parts.append(F'{i} ( )')
+
+    for i in range(num_axis):
+        parts.append(F'{i} ({axis_states.get(i, 0):+0.2f})')
+
+    print('\r ' + ' '.join(parts), end='')
+
+
+def button_press(number):
+    print_state()
+    if number in button_config:
+        keyboard.press(button_config[number])
+
+def button_release(number):
+    print_state()
+    if number in button_config:
+        keyboard.release(button_config[number])
+
+def axis_move(number, value):
+    print_state()
+    if number in axis_config:
+        axis_numer_config = axis_config[number]
+        
+        low = axis_numer_config.get('low')
+        low_threshold = axis_numer_config.get('low_threshold', -0.5)
+        high = axis_numer_config.get('high')
+        high_threshold = axis_numer_config.get('high_threshold', 0.5)
+
+        if not low is None:
+            if value <= low_threshold:
+                keyboard.press(low)
+            else:
+                keyboard.release(low)
+        if not high is None:
+            if value >= high_threshold:
+                keyboard.press(high)
+            else:
+                keyboard.release(high)
+
+while True:
+    for i in range(0, 10):
+        fn = F'/dev/input/js{i}'
+
+        try:
+            jsdev = open(fn, 'rb')
+        except OSError:
+            continue
+
+        print(F'\033[1m{fn}\033[0m')
+
+        buf = array.array('B', [0] * 64)
+        ioctl(jsdev, 0x80006a13 + (0x10000 * len(buf)), buf) # JSIOCGNAME(len)
+        name = buf.tobytes().rstrip(b'\x00').decode('utf-8')
+        print(' Name:   ', name)
+
+        buf = array.array('B', [0])
+        ioctl(jsdev, 0x80016a12, buf) # JSIOCGbutton
+        num_button = buf[0]
+        print(' Buttons:', num_button)
+
+        buf = array.array('B', [0])
+        ioctl(jsdev, 0x80016a11, buf) # JSIOCGaxis
+        num_axis = buf[0]
+        print(' Axes:   ', num_axis)
+
+        if not name in config:
+            print('\033[31m No config found.\033[0m\n')
+            jsdev.close()
+            continue
+        
+        print('\033[32m Config found.\033[0m\n')
+
+        joystick_config = config.get(name)
+        button_config = joystick_config.get('button', {})
+        axis_config = joystick_config.get('axis', {})
+
+        while True:
+            try:
+                evbuf = jsdev.read(8)
+            except OSError:
+                if print_state_enabled:
+                    print()
+                print('\033[31m Reading from device failed.\033[0m\n')
+                break
+
+            if evbuf:
+                evt_time, value, type_, number = struct.unpack('IhBB', evbuf)
+
+                is_initial = type_ & 0x80   # JS_EVENT_INIT
+
+                if type_ & 0x01:    # JS_EVENT_BUTTON
+                    button_states[number] = bool(value)
+                    if value:
+                        button_press(number)
+                    else:
+                        button_release(number)
+
+                if type_ & 0x02:    # JS_EVENT_AXIS
+                    fvalue = value / 32767.0
+                    axis_states[number] = fvalue
+                    axis_move(number, fvalue)
+    else:
+        time.sleep(1)
