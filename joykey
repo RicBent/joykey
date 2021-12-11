@@ -32,7 +32,7 @@ import array
 from fcntl import ioctl
 import pynput
 
-version = '1.0.0'
+version = '1.1.0'
 
 print(F'\033[1mjoykey {version}\033[0m\n')
 
@@ -75,6 +75,7 @@ config_paths = [
 ]
 
 for config_path in config_paths:
+    config_path = os.path.expanduser(config_path)
     try:
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
